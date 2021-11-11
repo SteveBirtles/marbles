@@ -1,14 +1,55 @@
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine.h"
 
-const int windowWidth = 1280;
-const int windowHeight = 720;
+struct Ball {
+  static int ballID;
+  int id;
+  float x;
+  float y;
+  float dx;
+  float dy;
+  float r;
+  float mass;
+  float simTime;
+  float lastX;
+  float lastY;
+  Ball(float _x, float _y, float _r = 20) {
+    id = ++ballID;
+    x = _x;
+    y = _y;
+    dx = 0;
+    dy = 0;
+    r = _r;
+    mass = _r * _r;
+    simTime = 0;
+    lastX = x;
+    lastY = y;
+  }
+};
+
+int Ball::ballID = 0;
+
+struct Collision {
+  Ball* first;
+  Ball* second;
+};
+
+struct Wall {
+
+
+
+};
 
 class Game : public olc::PixelGameEngine {
  public:
-  Game() { sAppName = "Raspberry Pi Club"; }
+  Game() { sAppName = "Marbles"; }
 
  private:
+  const int windowWidth = 1280;
+  const int windowHeight = 720;
+
+  const olc::vf2d gravity = {0, 100};
+
   olc::Sprite* spriteMarble;
   olc::Decal* decalMarble;
 
@@ -19,15 +60,20 @@ class Game : public olc::PixelGameEngine {
   int frames = 0;
   int fps = 0;
 
-  struct Ball {
-    float x;
-    float y;
-    float r;
-    float dx;
-    float dy;
+  Ball* currentBall = nullptr;
+  Wall* currentWall = nullptr;
+  int currentOffsetX, currentOffsetY;
+
+  bool simulationStopped = false;
+  const int maxSimulationSteps = 8;
+
+  struct Collision {
+    Ball* first;
+    Ball* second;
   };
 
   std::vector<Ball*> balls;
+  std::vector<Collision*> collisions;
 
  public:
   bool OnUserCreate() override {
@@ -38,10 +84,8 @@ class Game : public olc::PixelGameEngine {
     decalBackground = new olc::Decal(spriteBackground);
 
     for (int i = 0; i < 100; i++) {
-      balls.push_back(
-          new Ball{float(rand() % ScreenWidth()),
-                   float(rand() % ScreenHeight()), float(rand() % 20 + 20),
-                   float(rand() % 1000 - 500), float(rand() % 1000 - 500)});
+      balls.push_back(new Ball(float(rand() % ScreenWidth()),
+                               float(rand() % ScreenHeight())));
     }
 
     return true;
@@ -80,7 +124,7 @@ class Game : public olc::PixelGameEngine {
         olc::vi2d(rand() % spriteBackground->width,
                   rand() % spriteBackground->height),
         olc::Pixel(rand() % 256, rand() % 256, rand() % 256));
-    
+
     decalBackground->Update();
 
     SetPixelMode(olc::Pixel::MASK);
