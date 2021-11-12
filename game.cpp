@@ -1,8 +1,10 @@
 #define OLC_PGE_APPLICATION
+#define OLC_GFX_OPENGL33
 #include "olcPixelGameEngine.h"
 
 const int windowWidth = 1280;
 const int windowHeight = 720;
+const int infinity = 1000000000;
 
 struct Ball {
   static int ballID;
@@ -306,7 +308,7 @@ class Game : public olc::PixelGameEngine {
         for (auto wall : walls) {
           auto n = nearestPoint(mouseBall, wall);
 
-          if (n.x == MAXFLOAT) continue;
+          if (n.x == infinity) continue;
 
           auto distance = std::sqrt(std::pow(mouseBall->x - n.x, 2) +
                                     std::pow(mouseBall->y - n.y, 2));
@@ -434,7 +436,7 @@ class Game : public olc::PixelGameEngine {
     auto currentIn = ball->x >= left && ball->x <= right && ball->y >= top &&
                      ball->y <= bottom;
 
-    if (!(lastIn || currentIn)) return olc::vf2d{MAXFLOAT, MAXFLOAT};
+    if (!(lastIn || currentIn)) return olc::vf2d{infinity, infinity};
 
     auto alphaX = wall->end->x - wall->start->x;
     auto alphaY = wall->end->y - wall->start->y;
@@ -455,7 +457,7 @@ class Game : public olc::PixelGameEngine {
     for (auto wall : walls) {
       auto n = nearestPoint(ball, wall);
 
-      if (n.x == MAXFLOAT) continue;
+      if (n.x == infinity) continue;
 
       auto distance =
           std::sqrt(std::pow(ball->x - n.x, 2) + std::pow(ball->y - n.y, 2));
@@ -603,7 +605,7 @@ class Game : public olc::PixelGameEngine {
            2 * first->mass * firstDotProductNormal) /
           (first->mass + second->mass);
 
-      auto mu = 1;
+      auto mu = 1.0f;
       if (first->id == -1 || second->id == -1) mu = 0.5;
 
       first->dx = tangentX * firstDotProductTangent +
