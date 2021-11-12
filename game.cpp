@@ -85,9 +85,9 @@ class Game : public olc::PixelGameEngine {
   int frames = 0;
   int fps = 0;
 
-  int wallCollisionCount = 0;
-  int ballCollisionCount = 0;
-  int wallBreachCount = 0;
+  long wallCollisionCount = 0;
+  long ballCollisionCount = 0;
+  long wallBreachCount = 0;
 
   Ball *currentBall = nullptr;
   Wall *currentWall = nullptr;
@@ -187,7 +187,7 @@ class Game : public olc::PixelGameEngine {
     DrawStringDecal(olc::vi2d(ScreenWidth() - 300, 40),
                     "Drag  = Move ball or end of wall");
     DrawStringDecal(olc::vi2d(ScreenWidth() - 300, 55),
-                    "Alt + Click  = Delete ball or wall");
+                    "Backspace  = Delete ball or wall");
 
     return true;
   }
@@ -199,6 +199,35 @@ class Game : public olc::PixelGameEngine {
 
     if (GetKey(olc::Key::SPACE).bPressed) {
       simulationStopped = true;
+    }
+
+    if (GetKey(olc::Key::BACK).bHeld) {
+      if (currentBall != nullptr) {
+        for (auto i = 0; i < walls.size();) {
+          if (walls[i]->start->id == currentBall->id ||
+              walls[i]->end->id == currentBall->id) {
+            delete walls[i]->start;
+            delete walls[i]->end;
+            walls.erase(walls.begin() + i);
+            currentBall = nullptr;
+            break;
+          } else {
+            i++;
+          }
+        }
+        if (currentBall != nullptr && currentBall->id > 0) {
+          for (auto i = 0; i < balls.size();) {
+            if (balls[i]->id == currentBall->id) {
+              balls.erase(balls.begin() + i);
+              break;
+            } else {
+              i++;
+            }
+          }
+          delete currentBall;
+          currentBall = nullptr;
+        }
+      }
     }
 
     if (GetMouse(0).bHeld) {
@@ -227,70 +256,7 @@ class Game : public olc::PixelGameEngine {
         }
 
       } else {
-        if (currentBall == nullptr) {
-          for (auto ball : balls) {
-            if (std::pow(GetMouseX() - ball->x, 2) +
-                    std::pow(GetMouseY() - ball->y, 2) <
-                std::pow(ball->r, 2)) {
-              currentBall = ball;
-              currentOffsetX = ball->x - GetMouseX();
-              currentOffsetY = ball->y - GetMouseY();
-              break;
-            }
-          }
-          for (auto wall : walls) {
-            if (std::pow(GetMouseX() - wall->start->x, 2) +
-                    std::pow(GetMouseY() - wall->start->y, 2) <
-                std::pow(wall->r, 2)) {
-              currentBall = wall->start;
-              currentOffsetX = wall->start->x - GetMouseX();
-              currentOffsetY = wall->start->y - GetMouseY();
-              break;
-            } else if (std::pow(GetMouseX() - wall->end->x, 2) +
-                           std::pow(GetMouseY() - wall->end->y, 2) <
-                       std::pow(wall->r, 2)) {
-              currentBall = wall->end;
-              currentOffsetX = wall->end->x - GetMouseX();
-              currentOffsetY = wall->end->y - GetMouseY();
-              break;
-            }
-          }
-
-          if (GetKey(olc::Key::DEL).bHeld) {
-            if (currentBall != nullptr) {
-              for (auto i = 0; i < balls.size();) {
-                if (balls[i]->id == currentBall->id) {
-                  balls.erase(balls.begin() + i);
-                  break;
-                } else {
-                  i++;
-                }
-              }
-              delete currentBall;
-              currentBall = nullptr;
-
-              /*
-
-              if (currentWall != nullptr) {
-                            for (auto i = 0; i < walls.size();) {
-                              if (walls[i]->id == currentWall->id) {
-                                walls.erase(walls.begin() + i);
-                                break;
-                              } else {
-                                i++;
-                              }
-                            }
-                            delete currentWall->start;
-                            delete currentWall->end;
-                            delete currentWall;
-                            currentWall = nullptr;
-                          }
-
-              */
-            }
-          }
-
-        } else {
+        if (currentBall != nullptr) {
           auto newX = GetMouseX() + currentOffsetX;
           auto newY = GetMouseY() + currentOffsetY;
 
@@ -300,53 +266,103 @@ class Game : public olc::PixelGameEngine {
           currentBall->dy = 0;
         }
       }
-
     } else {
       currentBall = nullptr;
       currentWall = nullptr;
-    }
 
+      for (auto ball : balls) {
+        if (std::pow(GetMouseX() - ball->x, 2) +
+                std::pow(GetMouseY() - ball->y, 2) <
+            std::pow(ball->r, 2)) {
+          currentBall = ball;
+          currentOffsetX = ball->x - GetMouseX();
+          currentOffsetY = ball->y - GetMouseY();
+          break;
+        }
+      }
+
+      if (currentBall == nullptr) {
+        for (auto wall : walls) {
+          if (std::pow(GetMouseX() - wall->start->x, 2) +
+                  std::pow(GetMouseY() - wall->start->y, 2) <
+              std::pow(wall->r, 2)) {
+            currentBall = wall->start;
+            currentOffsetX = wall->start->x - GetMouseX();
+            currentOffsetY = wall->start->y - GetMouseY();
+            break;
+          } else if (std::pow(GetMouseX() - wall->end->x, 2) +
+                         std::pow(GetMouseY() - wall->end->y, 2) <
+                     std::pow(wall->r, 2)) {
+            currentBall = wall->end;
+            currentOffsetX = wall->end->x - GetMouseX();
+            currentOffsetY = wall->end->y - GetMouseY();
+            break;
+          }
+        }
+      }
+
+      if (currentBall == nullptr) {
+        auto mouseBall = new Ball(GetMouseX(), GetMouseY(), 0, true);
+        for (auto wall : walls) {
+          auto n = nearestPoint(mouseBall, wall);
+
+          if (n.x == MAXFLOAT) continue;
+
+          auto distance = std::sqrt(std::pow(mouseBall->x - n.x, 2) +
+                                    std::pow(mouseBall->y - n.y, 2));
+
+          if (distance != 0 && distance <= wall->r) {
+            if (std::pow(mouseBall->x - wall->start->x, 2) +
+                    std::pow(mouseBall->y - wall->start->y, 2) <
+                std::pow(mouseBall->x - wall->end->x, 2) +
+                    std::pow(mouseBall->y - wall->end->y, 2)) {
+              currentBall = wall->start;
+              currentOffsetX = wall->start->x - GetMouseX();
+              currentOffsetY = wall->start->y - GetMouseY();
+              break;
+            } else {
+              currentBall = wall->end;
+              currentOffsetX = wall->end->x - GetMouseX();
+              currentOffsetY = wall->end->y - GetMouseY();
+              break;
+            }
+          }
+        }
+        delete mouseBall;
+      }
+    }
     return true;
   }
 
-  void findWallCollisions(Ball *ball) {
-    for (auto wall : walls) {
-      auto left = std::min(wall->start->x, wall->end->x) - wall->r - ball->r;
-      auto top = std::min(wall->start->y, wall->end->y) - wall->r - ball->r;
-      auto right = std::max(wall->start->x, wall->end->x) + wall->r + ball->r;
-      auto bottom = std::max(wall->start->y, wall->end->y) + wall->r + ball->r;
+  void processDynamics(float frameLength) {
+    for (auto ball : balls) {
+      ball->simTime = frameLength;
+    }
 
-      auto lastIn = ball->lastX >= left && ball->lastX <= right &&
-                    ball->lastY >= top && ball->lastY <= bottom;
-      auto currentIn = ball->x >= left && ball->x <= right && ball->y >= top &&
-                       ball->y <= bottom;
+    resetWalls();
 
-      if (!(lastIn || currentIn)) continue;
+    for (auto j = 0; j < maxSimulationSteps; j++) {
+      for (auto b : balls) {
+        updateBall(b);
 
-      auto alphaX = wall->end->x - wall->start->x;
-      auto alphaY = wall->end->y - wall->start->y;
+        if (simulationStopped) break;
 
-      auto betaX = ball->x - wall->start->x;
-      auto betaY = ball->y - wall->start->y;
+        findBallCollisions(b);
 
-      auto wallLength = float(std::pow(alphaX, 2) + std::pow(alphaY, 2));
-      auto dotProduct = alphaX * betaX + alphaY * betaY;
-      auto t = std::max(0.0f, std::min(wallLength, dotProduct)) / wallLength;
-      auto u = wall->start->x + t * alphaX;
-      auto v = wall->start->y + t * alphaY;
-      auto distance =
-          std::sqrt(std::pow(ball->x - u, 2) + std::pow(ball->y - v, 2));
+        findWallCollisions(b);
 
-      if (distance != 0 && distance <= ball->r + wall->r) {
-        auto overlap = distance - ball->r - wall->r;
-        ball->x -= overlap * (ball->x - u) / distance;
-        ball->y -= overlap * (ball->y - v) / distance;
+        testWallBreaches(b);
 
-        collisions.push_back(new Collision{
-            ball,
-            new Ball(u, v, wall->r, true, -ball->dx, -ball->dy, ball->mass)});
-        wallCollisionCount++;
+        postProcess(b, frameLength);
       }
+
+      evaulateCollisions();
+
+      for (auto c : collisions) {
+        if (c->first->id == -1) delete c->first;
+        if (c->second->id == -1) delete c->second;
+      }
+      collisions.clear();
     }
   }
 
@@ -407,73 +423,53 @@ class Game : public olc::PixelGameEngine {
     }
   }
 
-  void processDynamics(float frameLength) {
-    for (auto ball : balls) {
-      ball->simTime = frameLength;
-    }
+  olc::vf2d nearestPoint(Ball *ball, Wall *wall) {
+    auto left = std::min(wall->start->x, wall->end->x) - wall->r - ball->r;
+    auto top = std::min(wall->start->y, wall->end->y) - wall->r - ball->r;
+    auto right = std::max(wall->start->x, wall->end->x) + wall->r + ball->r;
+    auto bottom = std::max(wall->start->y, wall->end->y) + wall->r + ball->r;
 
-    resetWalls();
+    auto lastIn = ball->lastX >= left && ball->lastX <= right &&
+                  ball->lastY >= top && ball->lastY <= bottom;
+    auto currentIn = ball->x >= left && ball->x <= right && ball->y >= top &&
+                     ball->y <= bottom;
 
-    for (auto j = 0; j < maxSimulationSteps; j++) {
-      for (auto b : balls) {
-        updateBall(b);
+    if (!(lastIn || currentIn)) return olc::vf2d{MAXFLOAT, MAXFLOAT};
 
-        if (simulationStopped) break;
+    auto alphaX = wall->end->x - wall->start->x;
+    auto alphaY = wall->end->y - wall->start->y;
 
-        findBallCollisions(b);
+    auto betaX = ball->x - wall->start->x;
+    auto betaY = ball->y - wall->start->y;
 
-        findWallCollisions(b);
+    auto wallLength = float(std::pow(alphaX, 2) + std::pow(alphaY, 2));
+    auto dotProduct = alphaX * betaX + alphaY * betaY;
+    auto tau = std::max(0.0f, std::min(wallLength, dotProduct)) / wallLength;
+    auto u = wall->start->x + tau * alphaX;
+    auto v = wall->start->y + tau * alphaY;
 
-        testWallBreaches(b);
-
-        postProcess(b, frameLength);
-      }
-
-      evaulateCollisions();
-
-      for (auto c : collisions) {
-        if (c->first->id == -1) delete c->first;
-        if (c->second->id == -1) delete c->second;
-      }
-      collisions.clear();
-    }
+    return olc::vf2d{u, v};
   }
 
-  void postProcess(Ball *ball, float frameLength) {
-    auto actualDistance = std::sqrt(std::pow(ball->x - ball->lastX, 2) +
-                                    std::pow(ball->y - ball->lastY, 2));
+  void findWallCollisions(Ball *ball) {
+    for (auto wall : walls) {
+      auto n = nearestPoint(ball, wall);
 
-    auto intendedSpeedSquared = std::pow(ball->dx, 2) + std::pow(ball->dy, 2);
-    if (intendedSpeedSquared > 0) {
-      auto intendedSpeed = std::sqrt(intendedSpeedSquared);
-      auto actualTime = actualDistance / intendedSpeed;
-      if (actualTime < frameLength) {
-        ball->simTime -= actualTime;
-      } else {
-        ball->simTime -= frameLength;
+      if (n.x == MAXFLOAT) continue;
+
+      auto distance =
+          std::sqrt(std::pow(ball->x - n.x, 2) + std::pow(ball->y - n.y, 2));
+
+      if (distance != 0 && distance <= ball->r + wall->r) {
+        auto overlap = distance - ball->r - wall->r;
+        ball->x -= overlap * (ball->x - n.x) / distance;
+        ball->y -= overlap * (ball->y - n.y) / distance;
+
+        collisions.push_back(
+            new Collision{ball, new Ball(n.x, n.y, wall->r, true, -ball->dx,
+                                         -ball->dy, ball->mass)});
+        wallCollisionCount++;
       }
-    } else {
-      ball->simTime -= frameLength;
-    }
-
-    if (ball->x < -ball->r) {
-      ball->x += ScreenWidth() + 2 * ball->r;
-      ball->lastX = ball->x;
-    }
-
-    if (ball->y < -ball->r) {
-      ball->y += ScreenHeight() + 2 * ball->r;
-      ball->lastY = ball->y;
-    }
-
-    if (ball->x > ScreenWidth() + ball->r) {
-      ball->x -= ScreenWidth() + 2 * ball->r;
-      ball->lastX = ball->x;
-    }
-
-    if (ball->y > ScreenHeight() + ball->r) {
-      ball->y -= ScreenHeight() + 2 * ball->r;
-      ball->lastY = ball->y;
     }
   }
 
@@ -534,6 +530,44 @@ class Game : public olc::PixelGameEngine {
       }
 
       reload = true;
+    }
+  }
+
+  void postProcess(Ball *ball, float frameLength) {
+    auto actualDistance = std::sqrt(std::pow(ball->x - ball->lastX, 2) +
+                                    std::pow(ball->y - ball->lastY, 2));
+
+    auto intendedSpeedSquared = std::pow(ball->dx, 2) + std::pow(ball->dy, 2);
+    if (intendedSpeedSquared > 0) {
+      auto intendedSpeed = std::sqrt(intendedSpeedSquared);
+      auto actualTime = actualDistance / intendedSpeed;
+      if (actualTime < frameLength) {
+        ball->simTime -= actualTime;
+      } else {
+        ball->simTime -= frameLength;
+      }
+    } else {
+      ball->simTime -= frameLength;
+    }
+
+    if (ball->x < -ball->r) {
+      ball->x += ScreenWidth() + 2 * ball->r;
+      ball->lastX = ball->x;
+    }
+
+    if (ball->y < -ball->r) {
+      ball->y += ScreenHeight() + 2 * ball->r;
+      ball->lastY = ball->y;
+    }
+
+    if (ball->x > ScreenWidth() + ball->r) {
+      ball->x -= ScreenWidth() + 2 * ball->r;
+      ball->lastX = ball->x;
+    }
+
+    if (ball->y > ScreenHeight() + ball->r) {
+      ball->y -= ScreenHeight() + 2 * ball->r;
+      ball->lastY = ball->y;
     }
   }
 
