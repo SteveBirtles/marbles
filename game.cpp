@@ -16,14 +16,21 @@ struct Ball {
   float simTime;
   float lastX;
   float lastY;
-  Ball(float _x, float _y, float _r = 20) {
-    id = ++ballID;
+  Ball(float _x, float _y, float _r, bool _temp = false, float _dx = 0,
+       float _dy = 0, float _mass = -1) {
+    if (_temp)
+      id = -1;
+    else
+      id = ++ballID;
     x = _x;
     y = _y;
-    dx = 0;
-    dy = 0;
+    dx = _dx;
+    dy = _dy;
     r = _r;
-    mass = _r * _r;
+    if (_mass == -1)
+      mass = _r * _r;
+    else
+      mass = _mass;
     simTime = 0;
     lastX = x;
     lastY = y;
@@ -33,56 +40,84 @@ struct Ball {
 int Ball::ballID = 0;
 
 struct Collision {
-  Ball* first;
-  Ball* second;
+  Ball *first;
+  Ball *second;
 };
 
-struct Wall {};
+struct Wall {
+  static int wallID;
+  int id;
+  Ball *start;
+  Ball *end;
+  float r;
+  float nx;
+  float ny;
+  Wall(Ball *_start, Ball *_end, float _r) {
+    id = ++wallID;
+    start = _start;
+    end = _end;
+    r = _r;
+  }
+};
+
+int Wall::wallID = 0;
 
 class Game : public olc::PixelGameEngine {
  public:
   Game() { sAppName = "Marbles"; }
 
  private:
-  const olc::vf2d gravity = {0, 100};
+  olc::vf2d gravity = {0, 100};
 
-  olc::Sprite* spriteMarble;
-  olc::Decal* decalMarble;
+  olc::Sprite *spriteMarble;
+  olc::Decal *decalMarble;
 
-  olc::Sprite* spriteBackground;
-  olc::Decal* decalBackground;
+  olc::Sprite *spriteWall;
+  olc::Decal *decalWall;
+
+  olc::Sprite *spriteWallEnd;
+  olc::Decal *decalWallEnd;
+
+  olc::Sprite *spriteBackground;
+  olc::Decal *decalBackground;
 
   float timer = 0.0;
   int frames = 0;
   int fps = 0;
 
-  Ball* currentBall = nullptr;
-  Wall* currentWall = nullptr;
+  int wallCollisionCount = 0;
+  int ballCollisionCount = 0;
+  int wallBreachCount = 0;
+
+  Ball *currentBall = nullptr;
+  Wall *currentWall = nullptr;
   int currentOffsetX, currentOffsetY;
 
   bool simulationStopped = false;
   const int maxSimulationSteps = 8;
 
   struct Collision {
-    Ball* first;
-    Ball* second;
+    Ball *first;
+    Ball *second;
   };
 
-  std::vector<Ball*> balls;
-  std::vector<Collision*> collisions;
+  std::vector<Ball *> balls;
+  std::vector<Collision *> collisions;
+  std::vector<Wall *> walls;
 
  public:
   bool OnUserCreate() override {
     spriteMarble = new olc::Sprite("./marble.png");
     decalMarble = new olc::Decal(spriteMarble);
 
+    spriteWall = new olc::Sprite("./wall.png");
+    decalWall = new olc::Decal(spriteWall);
+
+    spriteWallEnd = new olc::Sprite("./wallend.png");
+    decalWallEnd = new olc::Decal(spriteWallEnd);
+
     spriteBackground = new olc::Sprite("./background.png");
     decalBackground = new olc::Decal(spriteBackground);
-
-    for (int i = 0; i < 100; i++) {
-      balls.push_back(new Ball(float(rand() % ScreenWidth()),
-                               float(rand() % ScreenHeight())));
-    }
 
     return true;
   }
@@ -104,17 +139,55 @@ class Game : public olc::PixelGameEngine {
 
     DrawDecal(olc::vf2d(ScreenWidth() / 2 - spriteBackground->width / 2,
                         ScreenHeight() / 2 - spriteBackground->height / 2),
-              decalBackground, olc::vi2d(1, 1), olc::Pixel(128, 128, 128));
+              decalBackground, olc::vi2d(1, 1), olc::Pixel(64, 64, 64));
 
-    for (auto& ball : balls) {
+    for (auto ball : balls) {
       DrawDecal(olc::vf2d(ball->x - ball->r, ball->y - ball->r), decalMarble,
                 olc::vf2d(2 * ball->r / spriteMarble->width,
                           2 * ball->r / spriteMarble->height));
     }
 
-    if (fps > 0) {
-      DrawStringDecal(olc::vi2d(10, 10), "FPS " + std::to_string(fps));
+    for (auto wall : walls) {
+      auto scale = olc::vf2d{float(2 * wall->r / spriteWallEnd->width),
+                             float(2 * wall->r / spriteWallEnd->height)};
+      DrawDecal(olc::vf2d{wall->start->x - wall->r, wall->start->y - wall->r},
+                decalWallEnd, scale);
+      DrawDecal(olc::vf2d{wall->end->x - wall->r, wall->end->y - wall->r},
+                decalWallEnd, scale);
+      DrawPolygonDecal(
+          decalWall,
+          std::vector<olc::vf2d>{{wall->start->x + wall->nx * wall->r,
+                                  wall->start->y + wall->ny * wall->r},
+                                 {wall->end->x + wall->nx * wall->r,
+                                  wall->end->y + wall->ny * wall->r},
+                                 {wall->end->x - wall->nx * wall->r,
+                                  wall->end->y - wall->ny * wall->r},
+                                 {wall->start->x - wall->nx * wall->r,
+                                  wall->start->y - wall->ny * wall->r}},
+          std::vector<olc::vf2d>{{0, 0}, {0, 1}, {1, 1}, {1, 0}});
     }
+
+    if (fps > 0)
+      DrawStringDecal(olc::vi2d(10, ScreenHeight() - 20),
+                      "FPS " + std::to_string(fps));
+
+    DrawStringDecal(olc::vi2d(10, 10), "Balls " + std::to_string(balls.size()));
+    DrawStringDecal(olc::vi2d(10, 25), "Walls " + std::to_string(walls.size()));
+    DrawStringDecal(olc::vi2d(10, 40), "Total ball collisions " +
+                                           std::to_string(ballCollisionCount));
+    DrawStringDecal(olc::vi2d(10, 55), "Total wall collisions " +
+                                           std::to_string(wallCollisionCount));
+    DrawStringDecal(olc::vi2d(10, 70),
+                    "Total wall breaches " + std::to_string(wallBreachCount));
+
+    DrawStringDecal(olc::vi2d(ScreenWidth() - 300, 10),
+                    "Ctrl + Click = Add ball");
+    DrawStringDecal(olc::vi2d(ScreenWidth() - 300, 25),
+                    "Shift + Drag = Add wall");
+    DrawStringDecal(olc::vi2d(ScreenWidth() - 300, 40),
+                    "Drag  = Move ball or end of wall");
+    DrawStringDecal(olc::vi2d(ScreenWidth() - 300, 55),
+                    "Alt + Click  = Delete ball or wall");
 
     return true;
   }
@@ -128,161 +201,166 @@ class Game : public olc::PixelGameEngine {
       simulationStopped = true;
     }
 
-    /*if (balls.length > 0) {
-        if (keyIsDown(UP_ARROW)) {
-            balls[0].dy = -100;
+    if (GetMouse(0).bHeld) {
+      if (GetKey(olc::Key::CTRL).bHeld) {
+        auto radius = 10;
+        auto clear = true;
+        for (auto ball : balls) {
+          if (std::pow(GetMouseX() - ball->x, 2) +
+                  std::pow(GetMouseY() - ball->y, 2) <
+              std::pow(ball->r + radius, 2)) {
+            clear = false;
+            break;
+          }
         }
-        if (keyIsDown(LEFT_ARROW)) {
-            balls[0].dx -= 300 * frameLength;
-        } else if (keyIsDown(RIGHT_ARROW)) {
-            balls[0].dx += 300 * frameLength;
-        }
-    }
+        if (clear) balls.push_back(new Ball(GetMouseX(), GetMouseY(), radius));
 
-
-    if (mouseIsPressed) {
-
-        if (keyIsDown(CONTROL)) {
-
-            // ADD A BALL IF CONTROL + MOUSE CLICK
-
-            auto radius = 10;
-            auto clear = true;
-            for (auto ball : balls) {
-                if (std::pow(mouseX - ball->x, 2) + std::pow(mouseY - ball->y,
-    2) < std::pow(ball->r + radius, 2)) { clear = false; break;
-                }
-            }
-            if (clear) addNewBall(mouseX, mouseY, radius);
-
-        } else if (keyIsDown(SHIFT)) {
-
-            if (currentWall !== null) {
-
-                currentWall.end.x = mouseX;
-                currentWall.end.y = mouseY;
-
-            } else {
-
-                currentWall = { start: { x: mouseX, y: mouseY }, end: { x:
-    mouseX, y: mouseY }, r: 3 } walls.push(currentWall);
-            }
+      } else if (GetKey(olc::Key::SHIFT).bHeld) {
+        if (currentWall != nullptr) {
+          currentWall->end->x = GetMouseX();
+          currentWall->end->y = GetMouseY();
 
         } else {
-
-            if (currentBall === null) {
-
-                for (auto ball : balls) {
-                    if (std::pow(mouseX - ball->x, 2) + std::pow(mouseY -
-    ball->y, 2) < std::pow(ball->r, 2)) { currentBall = ball; currentOffsetX =
-    ball->x - mouseX; currentOffsetY = ball->y - mouseY; break;
-                    }
-                }
-                for (auto wall : walls) {
-                    if (std::pow(mouseX - wall.start.x, 2) + std::pow(mouseY -
-    wall.start.y, 2) < std::pow(wall.r, 2)) { currentBall = wall.start;
-                        currentOffsetX = wall.start.x - mouseX;
-                        currentOffsetY = wall.start.y - mouseY;
-                        break;
-                    } else if (std::pow(mouseX - wall.end.x, 2) +
-    std::pow(mouseY - wall.end.y, 2) < std::pow(wall.r, 2)) { currentBall =
-    wall.end; currentOffsetX = wall.end.x - mouseX; currentOffsetY = wall.end.y
-    - mouseY; break;
-                    }
-                }
-
-            } else {
-
-                const newX = mouseX + currentOffsetX;
-                const newY = mouseY + currentOffsetY;
-
-                currentball->x = newX;
-                currentball->y = newY;
-
-                if (currentball->hasOwnProperty("dx")) currentball->dx = 0;
-                if (currentball->hasOwnProperty("dy")) currentball->dy = 0;
-
-            }
-
+          currentWall = new Wall(new Ball(GetMouseX(), GetMouseY(), 5),
+                                 new Ball(GetMouseX(), GetMouseY(), 5), 5);
+          walls.push_back(currentWall);
         }
 
+      } else {
+        if (currentBall == nullptr) {
+          for (auto ball : balls) {
+            if (std::pow(GetMouseX() - ball->x, 2) +
+                    std::pow(GetMouseY() - ball->y, 2) <
+                std::pow(ball->r, 2)) {
+              currentBall = ball;
+              currentOffsetX = ball->x - GetMouseX();
+              currentOffsetY = ball->y - GetMouseY();
+              break;
+            }
+          }
+          for (auto wall : walls) {
+            if (std::pow(GetMouseX() - wall->start->x, 2) +
+                    std::pow(GetMouseY() - wall->start->y, 2) <
+                std::pow(wall->r, 2)) {
+              currentBall = wall->start;
+              currentOffsetX = wall->start->x - GetMouseX();
+              currentOffsetY = wall->start->y - GetMouseY();
+              break;
+            } else if (std::pow(GetMouseX() - wall->end->x, 2) +
+                           std::pow(GetMouseY() - wall->end->y, 2) <
+                       std::pow(wall->r, 2)) {
+              currentBall = wall->end;
+              currentOffsetX = wall->end->x - GetMouseX();
+              currentOffsetY = wall->end->y - GetMouseY();
+              break;
+            }
+          }
+
+          if (GetKey(olc::Key::DEL).bHeld) {
+            if (currentBall != nullptr) {
+              for (auto i = 0; i < balls.size();) {
+                if (balls[i]->id == currentBall->id) {
+                  balls.erase(balls.begin() + i);
+                  break;
+                } else {
+                  i++;
+                }
+              }
+              delete currentBall;
+              currentBall = nullptr;
+
+              /*
+
+              if (currentWall != nullptr) {
+                            for (auto i = 0; i < walls.size();) {
+                              if (walls[i]->id == currentWall->id) {
+                                walls.erase(walls.begin() + i);
+                                break;
+                              } else {
+                                i++;
+                              }
+                            }
+                            delete currentWall->start;
+                            delete currentWall->end;
+                            delete currentWall;
+                            currentWall = nullptr;
+                          }
+
+              */
+            }
+          }
+
+        } else {
+          auto newX = GetMouseX() + currentOffsetX;
+          auto newY = GetMouseY() + currentOffsetY;
+
+          currentBall->x = newX;
+          currentBall->y = newY;
+          currentBall->dx = 0;
+          currentBall->dy = 0;
+        }
+      }
+
     } else {
-
-        currentBall = null;
-        currentWall = null;
-
-    }*/
+      currentBall = nullptr;
+      currentWall = nullptr;
+    }
 
     return true;
   }
 
-  void findWallCollisions(Ball* ball) {
-    /*
-      for (auto i = 0; i < walls.length; i++) {
-        const wall = walls[i];
+  void findWallCollisions(Ball *ball) {
+    for (auto wall : walls) {
+      auto left = std::min(wall->start->x, wall->end->x) - wall->r - ball->r;
+      auto top = std::min(wall->start->y, wall->end->y) - wall->r - ball->r;
+      auto right = std::max(wall->start->x, wall->end->x) + wall->r + ball->r;
+      auto bottom = std::max(wall->start->y, wall->end->y) + wall->r + ball->r;
 
-        const left = Math.min(wall.start.x, wall.end.x) - wall.r - ball->r;
-        const top = Math.min(wall.start.y, wall.end.y) - wall.r - ball->r;
-        const right = Math.max(wall.start.x, wall.end.x) + wall.r + ball->r;
-        const bottom = Math.max(wall.start.y, wall.end.y) + wall.r + ball->r;
+      auto lastIn = ball->lastX >= left && ball->lastX <= right &&
+                    ball->lastY >= top && ball->lastY <= bottom;
+      auto currentIn = ball->x >= left && ball->x <= right && ball->y >= top &&
+                       ball->y <= bottom;
 
-        const lastX = ball->lastX;  // posStack[ball->posStack.length - 1].x;
-        const lastY = ball->lastY;  // posStack[ball->posStack.length - 1].y;
+      if (!(lastIn || currentIn)) continue;
 
-        const lastIn =
-            lastX >= left && lastX <= right && lastY >= top && lastY <= bottom;
-        const currentIn =
-            ball->x >= left && ball->x <= right && ball->y >= top && ball->y <=
-      bottom;
+      auto alphaX = wall->end->x - wall->start->x;
+      auto alphaY = wall->end->y - wall->start->y;
 
-        if (!(lastIn || currentIn)) continue;
+      auto betaX = ball->x - wall->start->x;
+      auto betaY = ball->y - wall->start->y;
 
-        const alphaX = wall.end.x - wall.start.x;
-        const alphaY = wall.end.y - wall.start.y;
+      auto wallLength = float(std::pow(alphaX, 2) + std::pow(alphaY, 2));
+      auto dotProduct = alphaX * betaX + alphaY * betaY;
+      auto t = std::max(0.0f, std::min(wallLength, dotProduct)) / wallLength;
+      auto u = wall->start->x + t * alphaX;
+      auto v = wall->start->y + t * alphaY;
+      auto distance =
+          std::sqrt(std::pow(ball->x - u, 2) + std::pow(ball->y - v, 2));
 
-        const betaX = ball->x - wall.start.x;
-        const betaY = ball->y - wall.start.y;
+      if (distance != 0 && distance <= ball->r + wall->r) {
+        auto overlap = distance - ball->r - wall->r;
+        ball->x -= overlap * (ball->x - u) / distance;
+        ball->y -= overlap * (ball->y - v) / distance;
 
-        const wallLength = std::pow(alphaX, 2) + std::pow(alphaY, 2);
-        const dotProduct = alphaX * betaX + alphaY * betaY;
-        const t = max(0, min(wallLength, dotProduct)) / wallLength;
-        const u = wall.start.x + t * alphaX;
-        const v = wall.start.y + t * alphaY;
-        const distance =
-            std::sqrt(std::pow(ball->x - u, 2) + std::pow(ball->y - v, 2));
-
-        if (distance != = 0 && distance <= ball->r + wall.r) {
-          const overlap = distance - ball->r - wall.r;
-          ball->x -= overlap * (ball->x - u) / distance;
-          ball->y -= overlap * (ball->y - v) / distance;
-
-          collisions.push({
-            first : ball,
-            second : {
-              id : -1,
-              x : u,
-              y : v,
-              dx : -ball->dx,
-              dy : -ball->dy,
-              r : wall.r,
-              mass : ball->mass
-            }
-          });
-        }
-      }*/
+        collisions.push_back(new Collision{
+            ball,
+            new Ball(u, v, wall->r, true, -ball->dx, -ball->dy, ball->mass)});
+        wallCollisionCount++;
+      }
+    }
   }
 
   void resetWalls() {
-    /*for (auto wall : walls) {
-      wall.nx = -(wall.end.y - wall.start.y);
-      wall.ny = (wall.end.x - wall.start.x) const d =
-          std::sqrt(std::pow(wall.nx, 2) + std::pow(wall.ny, 2));
-      wall.nx /= d;
-      wall.ny /= d;
-    }*/
+    for (auto wall : walls) {
+      wall->nx = -(wall->end->y - wall->start->y);
+      wall->ny = (wall->end->x - wall->start->x);
+      auto d = std::sqrt(std::pow(wall->nx, 2) + std::pow(wall->ny, 2));
+      wall->nx /= d;
+      wall->ny /= d;
+    }
   }
 
-  void updateBall(Ball* ball) {
+  void updateBall(Ball *ball) {
     if (ball->simTime > 0) {
       auto t = ball->simTime;
       auto v = std::sqrt(std::pow(ball->dx, 2) + std::pow(ball->dy, 2));
@@ -301,38 +379,32 @@ class Game : public olc::PixelGameEngine {
     }
   }
 
-  void findBallCollisions(Ball* ball1) {
-    /*for (auto i = 0; i < balls.length; i++) {
-      const ball2 = balls[i];
+  void findBallCollisions(Ball *ball1) {
+    for (auto ball2 : balls) {
+      if (ball1->id == ball2->id) continue;
 
-      if (ball1.id == = ball2.id || ball2.frozen) continue;
+      auto deltaX = ball1->x - ball2->x;
+      auto deltaY = ball1->y - ball2->y;
 
-      auto deltaX = ball1.x - ball2.x;
-      auto deltaY = ball1.y - ball2.y;
-
-      if (Math.abs(deltaX) > ball1.r + ball2.r ||
-          Math.abs(deltaY) > ball1.r + ball2.r)
+      if (std::abs(deltaX) > ball1->r + ball2->r ||
+          std::abs(deltaY) > ball1->r + ball2->r)
         continue;
 
       auto dSquared = std::pow(deltaX, 2) + std::pow(deltaY, 2);
-      if (dSquared < std::pow(ball1.r + ball2.r, 2)) {
-        collisions.push({first : ball1, second : ball2});
+      if (dSquared < std::pow(ball1->r + ball2->r, 2)) {
+        collisions.push_back(new Collision{ball1, ball2});
+        ballCollisionCount++;
 
-        const distance = std::sqrt(dSquared);
+        auto distance = std::sqrt(dSquared);
+        auto overlap = 0.5 * (distance - ball1->r - ball2->r);
 
-        auto overlap = 0.5 * (distance - ball1.r - ball2.r);
+        ball2->x += overlap * deltaX / distance;
+        ball2->y += overlap * deltaY / distance;
 
-        if (ball2.frozen) {
-          overlap *= 2;
-        } else {
-          ball2.x += overlap * deltaX / distance;
-          ball2.y += overlap * deltaY / distance;
-        }
-
-        ball1.x -= overlap * deltaX / distance;
-        ball1.y -= overlap * deltaY / distance;
+        ball1->x -= overlap * deltaX / distance;
+        ball1->y -= overlap * deltaY / distance;
       }
-    }*/
+    }
   }
 
   void processDynamics(float frameLength) {
@@ -358,16 +430,18 @@ class Game : public olc::PixelGameEngine {
       }
 
       evaulateCollisions();
+
+      for (auto c : collisions) {
+        if (c->first->id == -1) delete c->first;
+        if (c->second->id == -1) delete c->second;
+      }
+      collisions.clear();
     }
   }
 
-  void postProcess(Ball* ball, float frameLength) {
-    /*
-    const lastX = ball->lastX;  // posStack[ball->posStack.length - 1].x;
-    const lastY = ball->lastY;  // posStack[ball->posStack.length - 1].y;
-
-    auto actualDistance =
-        std::sqrt(std::pow(ball->x - lastX, 2) + std::pow(ball->y - lastY, 2));
+  void postProcess(Ball *ball, float frameLength) {
+    auto actualDistance = std::sqrt(std::pow(ball->x - ball->lastX, 2) +
+                                    std::pow(ball->y - ball->lastY, 2));
 
     auto intendedSpeedSquared = std::pow(ball->dx, 2) + std::pow(ball->dy, 2);
     if (intendedSpeedSquared > 0) {
@@ -380,23 +454,40 @@ class Game : public olc::PixelGameEngine {
       }
     } else {
       ball->simTime -= frameLength;
-    }*/
+    }
+
+    if (ball->x < -ball->r) {
+      ball->x += ScreenWidth() + 2 * ball->r;
+      ball->lastX = ball->x;
+    }
+
+    if (ball->y < -ball->r) {
+      ball->y += ScreenHeight() + 2 * ball->r;
+      ball->lastY = ball->y;
+    }
+
+    if (ball->x > ScreenWidth() + ball->r) {
+      ball->x -= ScreenWidth() + 2 * ball->r;
+      ball->lastX = ball->x;
+    }
+
+    if (ball->y > ScreenHeight() + ball->r) {
+      ball->y -= ScreenHeight() + 2 * ball->r;
+      ball->lastY = ball->y;
+    }
   }
 
-  void testWallBreaches(Ball* ball) {
-    /*auto x1, y1, x2, y2, x3, y3, x4, y4;
-    auto ballD, ballUnitX, ballUnitY, rBallX, rBallY;
+  void testWallBreaches(Ball *ball) {
+    float x1, y1, x2, y2, x3, y3, x4, y4;
+    int ballD;
+    float ballUnitX, ballUnitY, rBallX, rBallY;
 
     auto reload = true;
 
-    // for (auto wall : walls) {
-
-    for (auto i = 0; i < walls.length; i++) {
-      const wall = walls[i];
-
+    for (auto wall : walls) {
       if (reload) {
-        x1 = ball->lastX;  // ball->posStack[ball->posStack.length - 1].x;
-        y1 = ball->lastY;  // ball->posStack[ball->posStack.length - 1].y;
+        x1 = ball->lastX;
+        y1 = ball->lastY;
         x2 = ball->x;
         y2 = ball->y;
 
@@ -406,108 +497,91 @@ class Game : public olc::PixelGameEngine {
         reload = false;
       }
 
-      auto x3 = wall.start.x;
-      auto y3 = wall.start.y;
-      auto x4 = wall.end.x;
-      auto y4 = wall.end.y;
+      auto x3 = wall->start->x;
+      auto y3 = wall->start->y;
+      auto x4 = wall->end->x;
+      auto y4 = wall->end->y;
 
-      const wallD = std::sqrt(std::pow(x4 - x3, 2) + std::pow(y4 - y3, 2));
+      auto wallD = std::sqrt(std::pow(x4 - x3, 2) + std::pow(y4 - y3, 2));
       if (wallD == 0) continue;
 
-      const d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+      auto d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
       if (d == 0) continue;
 
-      const p = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / d;
-      const q = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / d;
+      auto p = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / d;
+      auto q = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / d;
 
       if (p >= -ball->r / ballD && p <= 1 + ball->r / ballD &&
-          q >= -wall.r / wallD && q <= 1 + wall.r / wallD) {
-        const delta = std::sqrt(std::pow(x2 - x1, 2) + std::pow(y2 - y1, 2));
+          q >= -wall->r / wallD && q <= 1 + wall->r / wallD) {
+        auto delta = std::sqrt(std::pow(x2 - x1, 2) + std::pow(y2 - y1, 2));
 
-        auto nx = wall.nx;
-        auto ny = wall.ny;
+        auto nx = wall->nx;
+        auto ny = wall->ny;
 
         auto u = x3 + q * (x4 - x3);
         auto v = y3 + q * (y4 - y3);
 
-        auto lx = u - ball->lastX;  // ball->posStack[ball->posStack.length -
-    1].x; auto ly = v - ball->lastY;  // ball->posStack[ball->posStack.length -
-    1].y;
+        auto lx = u - ball->lastX;
 
-        ball->x = u - nx * (ball->r + wall.r);
-        ball->y = v - ny * (ball->r + wall.r);
+        auto ly = v - ball->lastY;
+
+        ball->x = u - nx * (ball->r + wall->r);
+        ball->y = v - ny * (ball->r + wall->r);
         ball->lastX = ball->x;
         ball->lastY = ball->y;
-        // ball->posStack.push({ x: ball->x, y: ball->y, r: 255, g: 255, b: 0
-    });
 
-        reload = true;
-
-        // ball->red = 0;
-        // ball->green = 0;
-        // ball->blue = 255;
+        wallBreachCount++;
       }
-    }*/
+
+      reload = true;
+    }
   }
 
   void evaulateCollisions() {
-    /*for (auto i = 0; i < collisions.length; i++) {
-      const collision = collisions[i];
+    for (auto collision : collisions) {
+      auto first = collision->first;
+      auto second = collision->second;
 
-      const first = collision.first;
-      const second = collision.second;
+      auto distance = std::sqrt(std::pow(first->x - second->x, 2) +
+                                std::pow(first->y - second->y, 2));
 
-      const distance = std::sqrt(std::pow(first.x - second.x, 2) +
-                                 std::pow(first.y - second.y, 2));
+      if (distance == 0) continue;
 
-      if (distance == = 0) continue;
+      auto normalX = (second->x - first->x) / distance;
+      auto normalY = (second->y - first->y) / distance;
 
-      const normalX = (second.x - first.x) / distance;
-      const normalY = (second.y - first.y) / distance;
+      auto tangentX = -normalY;
+      auto tangentY = normalX;
 
-      const tangentX = -normalY;
-      const tangentY = normalX;
+      auto firstDotProductTangent = first->dx * tangentX + first->dy * tangentY;
+      auto secondDotProductTangent =
+          second->dx * tangentX + second->dy * tangentY;
 
-      const firstDotProductTangent = first.dx * tangentX + first.dy * tangentY;
-      const secondDotProductTangent = second.dx * tangentX + second.dy *
-    tangentY;
+      auto firstDotProductNormal = first->dx * normalX + first->dy * normalY;
+      auto secondDotProductNormal = second->dx * normalX + second->dy * normalY;
 
-      const firstDotProductNormal = first.dx * normalX + first.dy * normalY;
-      const secondDotProductNormal = second.dx * normalX + second.dy * normalY;
-
-      const firstMomentumConservation =
-          (firstDotProductNormal * (first.mass - second.mass) +
-           2 * second.mass * secondDotProductNormal) /
-          (first.mass + second.mass);
-      const secondMomentumConservation =
-          (secondDotProductNormal * (second.mass - first.mass) +
-           2 * first.mass * firstDotProductNormal) /
-          (first.mass + second.mass);
+      auto firstMomentumConservation =
+          (firstDotProductNormal * (first->mass - second->mass) +
+           2 * second->mass * secondDotProductNormal) /
+          (first->mass + second->mass);
+      auto secondMomentumConservation =
+          (secondDotProductNormal * (second->mass - first->mass) +
+           2 * first->mass * firstDotProductNormal) /
+          (first->mass + second->mass);
 
       auto mu = 1;
-      if (first.id == = -1 || second.id == = -1) mu = 0.5;
+      if (first->id == -1 || second->id == -1) mu = 0.5;
 
-      first.dx = tangentX * firstDotProductTangent +
-                 mu * normalX * firstMomentumConservation;
-      first.dy = tangentY * firstDotProductTangent +
-                 mu * normalY * firstMomentumConservation;
-      if (second.id == = -1) {
-        first.da = -firstDotProductTangent / first.r;
-      } else {
-        first.da = 0;
-      }
+      first->dx = tangentX * firstDotProductTangent +
+                  mu * normalX * firstMomentumConservation;
+      first->dy = tangentY * firstDotProductTangent +
+                  mu * normalY * firstMomentumConservation;
 
-      second.dx = tangentX * secondDotProductTangent +
-                  mu * normalX * secondMomentumConservation;
-      second.dy = tangentY * secondDotProductTangent +
-                  mu * normalY * secondMomentumConservation;
-      if (first.id == = -1) {
-        second.da = secondDotProductTangent / second.r;
-      } else {
-        second.da = 0;
-      }
-
-    }*/
+      second->dx = tangentX * secondDotProductTangent +
+                   mu * normalX * secondMomentumConservation;
+      second->dy = tangentY * secondDotProductTangent +
+                   mu * normalY * secondMomentumConservation;
+    }
   }
 
   bool OnUserDestroy() override {
